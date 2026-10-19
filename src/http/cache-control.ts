@@ -37,12 +37,18 @@ export function cacheControlForbidsReuse(cacheControl: unknown): boolean {
   return shared !== undefined && shared <= 0;
 }
 
-/** Returns whether stale reuse requires revalidation. */
+/**
+ * Returns whether stale reuse requires revalidation.
+ *
+ * `proxy-revalidate` is `must-revalidate` for shared caches (RFC 9111 section 5.2.2.8).
+ */
 export function requiresRevalidation(cacheControl: unknown): boolean {
   if (typeof cacheControl !== "string" || !cacheControl) {
     return false;
   }
-  return cacheControlDirectives(cacheControl).some(([name]) => name === "must-revalidate");
+  return cacheControlDirectives(cacheControl).some(
+    ([name]) => name === "must-revalidate" || name === "proxy-revalidate",
+  );
 }
 
 /** Parses directives, including quoted values that contain commas. */

@@ -116,7 +116,7 @@ export function defineCachedHandler<E extends HTTPEvent = HTTPEvent>(
           };
         }
       : undefined,
-    // `must-revalidate` permits storage but sets the stale window to zero.
+    // `must-revalidate` and `proxy-revalidate` permit storage but set the stale window to zero.
     getMaxAge: async (entry) => {
       const res = entry.value;
       // Do not consume the body before serialization.
