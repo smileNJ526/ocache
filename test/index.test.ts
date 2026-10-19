@@ -3954,66 +3954,74 @@ describe("defineCachedHandler", () => {
       },
     );
 
-    it("stores a response with Cache-Control: must-revalidate (not an opt-out)", async () => {
-      let callCount = 0;
-      const path = uniquePath();
-      const handler = defineCachedHandler(
-        () => {
-          callCount++;
-          return new Response(`v${callCount}`, {
-            headers: { "cache-control": "public, max-age=60, must-revalidate" },
-          });
-        },
-        { maxAge: 10, swr: true, staleMaxAge: 600, name: "must-revalidate-store" },
-      );
+    it.each(["must-revalidate", "proxy-revalidate"])(
+      "stores a response with Cache-Control: %s (not an opt-out)",
+      async (directive) => {
+        let callCount = 0;
+        const path = uniquePath();
+        const handler = defineCachedHandler(
+          () => {
+            callCount++;
+            return new Response(`v${callCount}`, {
+              headers: { "cache-control": `public, max-age=60, ${directive}` },
+            });
+          },
+          { maxAge: 10, swr: true, staleMaxAge: 600, name: `${directive}-store` },
+        );
 
-      const r1 = (await handler(makeEvent(path))) as Response;
-      const r2 = (await handler(makeEvent(path))) as Response;
+        const r1 = (await handler(makeEvent(path))) as Response;
+        const r2 = (await handler(makeEvent(path))) as Response;
 
-      // `must-revalidate` constrains *stale* serving, not storage — a fresh entry is a
-      // normal HIT.
-      expect(await r1.text()).toBe("v1");
-      expect(await r2.text()).toBe("v1");
-      expect(callCount).toBe(1);
-      expect(r2.headers.get("x-cache")).toBe("HIT");
+        // `must-revalidate` constrains *stale* serving, not storage — a fresh entry is a
+        // normal HIT.
+        expect(await r1.text()).toBe("v1");
+        expect(await r2.text()).toBe("v1");
+        expect(callCount).toBe(1);
+        expect(r2.headers.get("x-cache")).toBe("HIT");
 
-      // Expressed as a per-entry `staleMaxAge: 0` (the mechanism that disables the SWR
-      // window for this entry alone), persisted alongside the value.
-      const keys = await handler.resolveKeys(makeEvent(path));
-      const entry = (await testStorage.get(keys[0]!)) as any;
-      expect(entry.staleMaxAge).toBe(0);
-      expect(entry.value.body).toBe("v1");
-    });
+        // Expressed as a per-entry `staleMaxAge: 0` (the mechanism that disables the SWR
+        // window for this entry alone), persisted alongside the value.
+        const keys = await handler.resolveKeys(makeEvent(path));
+        const entry = (await testStorage.get(keys[0]!)) as any;
+        expect(entry.staleMaxAge).toBe(0);
+        expect(entry.value.body).toBe("v1");
+      },
+    );
 
-    it("never serves a stale must-revalidate entry, revalidating in the foreground", async () => {
-      let callCount = 0;
-      const path = uniquePath();
-      const handler = defineCachedHandler(
-        async () => {
-          callCount++;
-          // A slow resolver: under SWR a stale entry would be returned immediately (as the
-          // sibling test below shows), so a fresh body here proves the foreground path.
-          await new Promise((r) => setTimeout(r, 5));
-          return new Response(`v${callCount}`, {
-            headers: { "cache-control": "public, max-age=60, must-revalidate" },
-          });
-        },
-        { maxAge: 0.02, swr: true, staleMaxAge: 10, name: "must-revalidate-stale" },
-      );
+    // `proxy-revalidate` is `must-revalidate` for shared caches (RFC 9111 §5.2.2.8), and
+    // ocache is one.
+    it.each(["must-revalidate", "proxy-revalidate"])(
+      "never serves a stale %s entry, revalidating in the foreground",
+      async (directive) => {
+        let callCount = 0;
+        const path = uniquePath();
+        const handler = defineCachedHandler(
+          async () => {
+            callCount++;
+            // A slow resolver: under SWR a stale entry would be returned immediately (as the
+            // sibling test below shows), so a fresh body here proves the foreground path.
+            await new Promise((r) => setTimeout(r, 5));
+            return new Response(`v${callCount}`, {
+              headers: { "cache-control": `public, max-age=60, ${directive}` },
+            });
+          },
+          { maxAge: 0.02, swr: true, staleMaxAge: 10, name: `${directive}-stale` },
+        );
 
-      const r1 = (await handler(makeEvent(path))) as Response;
-      expect(await r1.text()).toBe("v1");
-      expect(callCount).toBe(1);
+        const r1 = (await handler(makeEvent(path))) as Response;
+        expect(await r1.text()).toBe("v1");
+        expect(callCount).toBe(1);
 
-      // Past maxAge but well inside the configured 10s stale window.
-      await new Promise((r) => setTimeout(r, 30));
-      const r2 = (await handler(makeEvent(path))) as Response;
+        // Past maxAge but well inside the configured 10s stale window.
+        await new Promise((r) => setTimeout(r, 30));
+        const r2 = (await handler(makeEvent(path))) as Response;
 
-      expect(callCount).toBe(2);
-      // The caller waited for the revalidated response instead of getting the stale one.
-      expect(await r2.text()).toBe("v2");
-      expect(r2.headers.get("x-cache")).not.toBe("STALE");
-    });
+        expect(callCount).toBe(2);
+        // The caller waited for the revalidated response instead of getting the stale one.
+        expect(await r2.text()).toBe("v2");
+        expect(r2.headers.get("x-cache")).not.toBe("STALE");
+      },
+    );
 
     it("enforces must-revalidate even when the caller's getMaxAge throws", async () => {
       let callCount = 0;
